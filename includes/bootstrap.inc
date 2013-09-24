@@ -2483,8 +2483,10 @@ function drupal_valid_test_ua() {
     $check_string =  $prefix . ';' . $time . ';' . $salt;
     $time_diff = REQUEST_TIME - $time;
     // Since we are making a local request a 5 second time window is allowed,
-    // and the HMAC must match.
-    if ($time_diff >= 0 && $time_diff <= 5 && $hmac == drupal_hmac_base64($check_string, _drupal_test_ua_key())) {
+    // and the HMAC must match. If the test is running on a different server
+    // than the site under test (or on one server in a multiple web node
+    // environment), it is possible for $time to be ahead of REQUEST_TIME.
+    if ($time_diff >= -5 && $time_diff <= 5 && $hmac == drupal_hmac_base64($check_string, _drupal_test_ua_key())) {
       $test_prefix = $prefix;
       return $test_prefix;
     }
