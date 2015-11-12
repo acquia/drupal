@@ -8,7 +8,7 @@
 /**
  * The current system version.
  */
-define('VERSION', '7.42-dev');
+define('VERSION', '7.41');
 
 /**
  * Core API compatibility.
@@ -725,7 +725,7 @@ function drupal_settings_initialize() {
   global $base_url, $base_path, $base_root;
 
   // Export these settings.php variables to the global namespace.
-  global $databases, $cookie_domain, $conf, $installed_profile, $update_free_access, $db_url, $db_prefix, $drupal_hash_salt, $is_https, $base_secure_url, $base_insecure_url;
+  global $databases, $cookie_domain, $conf, $installed_profile, $update_free_access, $db_url, $db_prefix, $drupal_hash_salt, $is_https, $base_secure_url, $base_insecure_url, $drupal_cluster_shared_secret_file;
   $conf = array();
 
   if (file_exists(DRUPAL_ROOT . '/' . conf_path() . '/settings.php')) {
@@ -2552,14 +2552,12 @@ function drupal_valid_test_ua() {
   if (isset($_SERVER['HTTP_USER_AGENT']) && preg_match("/^(simpletest\d+);(.+);(.+);(.+)$/", $_SERVER['HTTP_USER_AGENT'], $matches)) {
     list(, $prefix, $time, $salt, $hmac) = $matches;
     $check_string =  $prefix . ';' . $time . ';' . $salt;
-    // We use the salt from settings.php to make the HMAC key, since
-    // the database is not yet initialized and we can't access any Drupal variables.
-    // The file properties add more entropy not easily accessible to others.
-    $key = drupal_get_hash_salt() . filectime(__FILE__) . fileinode(__FILE__);
     $time_diff = REQUEST_TIME - $time;
     // Since we are making a local request a 5 second time window is allowed,
-    // and the HMAC must match.
-    if ($time_diff >= 0 && $time_diff <= 5 && $hmac == drupal_hmac_base64($check_string, $key)) {
+    // and the HMAC must match. If the test is running on a different server
+    // than the site under test (or on one server in a multiple web node
+    // environment), it is possible for $time to be ahead of REQUEST_TIME.
+    if ($time_diff >= -5 && $time_diff <= 5 && $hmac == drupal_hmac_base64($check_string, _drupal_test_ua_key())) {
       $test_prefix = $prefix;
       return $test_prefix;
     }
@@ -2573,18 +2571,33 @@ function drupal_valid_test_ua() {
  * Generates a user agent string with a HMAC and timestamp for simpletest.
  */
 function drupal_generate_test_ua($prefix) {
-  static $key;
-
-  if (!isset($key)) {
-    // We use the salt from settings.php to make the HMAC key, since
-    // the database is not yet initialized and we can't access any Drupal variables.
-    // The file properties add more entropy not easily accessible to others.
-    $key = drupal_get_hash_salt() . filectime(__FILE__) . fileinode(__FILE__);
-  }
   // Generate a moderately secure HMAC based on the database credentials.
   $salt = uniqid('', TRUE);
   $check_string = $prefix . ';' . time() . ';' . $salt;
-  return $check_string . ';' . drupal_hmac_base64($check_string, $key);
+  return $check_string . ';' . drupal_hmac_base64($check_string, _drupal_test_ua_key());
+}
+
+/**
+ * Returns the secret key for the HMAC for simpletest.
+ */
+function _drupal_test_ua_key() {
+  global $drupal_hash_salt, $drupal_cluster_shared_secret_file;
+  static $key;
+
+  if (!isset($key)) {
+    if (!empty($drupal_cluster_shared_secret_file) && is_file($drupal_cluster_shared_secret_file)) {
+      // To allow testing to work on a cluster of web servers, a file with a
+      // cluster shared secret may be set in settings.php.
+      $shared_secret = trim(@file_get_contents($drupal_cluster_shared_secret_file));
+    }
+    // We use the salt from settings.php to make the HMAC key, because the
+    // database is not yet initialized and we can't access any Drupal variables.
+    // If the cluster shared secret is empty, fall back to a single-server test
+    // mode using file properties which add more entropy not easily accessible
+    // to others.
+    $key = $drupal_hash_salt . (!empty($shared_secret) ? $shared_secret : filectime(__FILE__) . fileinode(__FILE__));
+  }
+  return $key;
 }
 
 /**

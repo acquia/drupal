@@ -72,6 +72,9 @@ $test_list = simpletest_script_get_test_list();
 // Try to allocate unlimited time to run the tests.
 drupal_set_time_limit(0);
 
+// Try to set a long MySQL wait timeout.
+simpletest_script_set_wait_timeout(28800);
+
 simpletest_script_reporter_init();
 
 // Setup database for test results.
@@ -721,4 +724,13 @@ function simpletest_script_print_alternatives($string, $array, $degree = 4) {
       simpletest_script_print("  - $alternative\n", SIMPLETEST_SCRIPT_COLOR_FAIL);
     }
   }
+}
+
+/**
+ * Set the MySQL wait_timeout value for the database session.
+ *
+ * @param $timeout The MySQL server wait_timeout value in seconds.
+ */
+function simpletest_script_set_wait_timeout($timeout = 28800) {
+  db_query("SET SESSION wait_timeout=$timeout");
 }
